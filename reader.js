@@ -1,5 +1,9 @@
 'use strict';
 const ReaderRules = {
+  link(token, page, cutoff) {
+    const label = token.label || (page && this.name(page, cutoff)) || '';
+    return {label, href: page && page.from <= cutoff && this.name(page, cutoff) ? page.file : null};
+  },
   name(page, cutoff) { return page.names.filter(n => n.from <= cutoff).at(-1)?.text || ''; },
   pages(data, cutoff) { return data.pages.filter(p => p.from <= cutoff && this.name(p, cutoff)); },
   blocks(page, cutoff) { return page.blocks.filter(b => b.from <= cutoff); },
@@ -116,9 +120,8 @@ if (typeof document !== 'undefined') (() => {
     return block.tokens.map(token => {
       if (token.text !== undefined) return token.text;
       const page = lookup.get(token.page);
-      const label = page && name(page);
-      if (!label || page.from > cutoff) return ''; // omit unknown entity labels entirely
-      return el('a',{href:page.file},label);
+      const link = ReaderRules.link(token, page, cutoff);
+      return link.href ? el('a',{href:link.href},link.label) : link.label;
     });
   }
   function evidence(blocks) {
@@ -148,7 +151,7 @@ if (typeof document !== 'undefined') (() => {
   function card(page) {
     const image = ReaderRules.images(page,cutoff).find(i => i.role === 'primary' && !i.spoiler);
     const preview = ReaderRules.blocks(page,cutoff).find(b => b.kind === 'introduction');
-    const previewText = preview ? preview.tokens.map(x => x.text !== undefined ? x.text : name(lookup.get(x.page))).join('') : '';
+    const previewText = preview ? preview.tokens.map(x => x.text !== undefined ? x.text : x.label || name(lookup.get(x.page))).join('') : '';
     const picture = image ? el('div',{class:'card-picture'},el('img',{src:image.file,alt:'',loading:'lazy'})) : el('div',{class:'card-picture placeholder','aria-hidden':'true'},name(page).slice(0,1));
     return el('a',{href:page.file,class:'person-card','data-page-id':page.id},picture,
       el('div',{class:'card-copy'},el('h3',{},name(page)),el('p',{},previewText.length > 145 ? previewText.slice(0,142)+'…' : previewText),el('span',{class:'read-link'},t.read+' ↗')));
