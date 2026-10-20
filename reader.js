@@ -44,9 +44,10 @@ if (typeof document !== 'undefined') (() => {
     noStorage:'This browser cannot save your choice. It will last for this page only.',
     books:'Books',bookPage:'The book',chapterSummaries:'Chapter summaries',chapters:'Chapters',readBook:'Explore this book',
     bookHint:'READ CHAPTER BY CHAPTER',bookHelp:'Only summaries up to your reading position appear below.',available:'chapters in this edition',
-    introduction:'Introduction',noSummary:'This chapter summary is awaiting a source-verified revision.'
+    introduction:'Introduction',noSummary:'This chapter summary is awaiting a source-verified revision.', enlargeImage:'View larger image', closeImage:'Close image'
   };
   const nb = {
+    enlargeImage:'Vis større bilde', closeImage:'Lukk bilde',
     companion:'En lesefølgesvenn',explore:'Utforsk',about:'Om denne utgaven',yourReading:'DIN LESING',setPlace:'Finn ditt sted.',controlHelp:'Utforsk bare det du allerede har lest.',
     savedLocally:'Valget lagres i denne nettleseren.',browse:'UTFORSK WIKIEN',quietPromise:'Neste oppdagelse kan vente.',footer:'En uoffisiell lesefølgesvenn. Bildene er kunstneriske tolkninger.',
     book:'Bok',chapter:'Kapittel',notStarted:'Ikke startet',reset:'Nullstill leseposisjon',heroA:'En verden å oppdage.',heroB:'I ditt eget tempo.',edition:'DEN ILLUSTRERTE LESERUTGAVEN',
@@ -62,7 +63,7 @@ if (typeof document !== 'undefined') (() => {
     books:'Bøker',bookPage:'Boken',chapterSummaries:'Kapitteloppsummeringer',chapters:'Kapitler',readBook:'Utforsk boken',bookHint:'LES KAPITTEL FOR KAPITTEL',
     bookHelp:'Bare oppsummeringer frem til leseposisjonen vises nedenfor.',available:'kapitler i denne utgaven',introduction:'Introduksjon',noSummary:'Denne kapitteloppsummeringen venter på en kildeverifisert revisjon.'
   };
-  const nn = {...nb,setPlace:'Finn din stad.',controlHelp:'Utforsk berre det du allereie har lese.',savedLocally:'Valet vert lagra i denne nettlesaren.',
+  const nn = {...nb,enlargeImage:'Vis større bilete',closeImage:'Lukk bilete',setPlace:'Finn din stad.',controlHelp:'Utforsk berre det du allereie har lese.',savedLocally:'Valet vert lagra i denne nettlesaren.',
     notStarted:'Ikkje byrja',reset:'Nullstill leseposisjonen',begin:'Byrj med kapittel 1',startTitle:'Historia di byrjar her.',startText:'Vel det siste kapittelet du har lese ferdig. Personar, stader og bilete vert viste etter kvart som du møter dei.',
     choose:'Vel kapittel for å byrje',protected:'Seinare innhald er skjult',later:'Seinare innhald er skjult. Endre leseposisjonen når du er klar.',
     appearance:'Utsjånad',source:'Kjeldetilvisingar',imageCaption:'Illustrasjonen er ikkje kanonisk og vert først vist etter den dokumenterte kapittelgrensa.',
@@ -135,10 +136,37 @@ if (typeof document !== 'undefined') (() => {
     if (!blocks.length) return [];
     return [...ReaderRules.passages(blocks).map(b => el('p',{class:lead?'page-description':null},tokens(b))),evidence(blocks)];
   }
+  let imageViewer = null;
+  function closeImageViewer() {
+    if (!imageViewer) return;
+    const dialog = imageViewer;
+    imageViewer = null;
+    dialog.close();
+    dialog.remove();
+  }
+  function openImage(image, page) {
+    if (page.from > cutoff || image.from > cutoff || !name(page)) return;
+    closeImageViewer();
+    const caption = el('p',{id:'image-viewer-caption'},t.noncanonical+' · '+name(page)+' · '+chapterLabel(image.from));
+    const dialog = el('dialog',{class:'image-viewer','aria-label':t.illustration,'aria-describedby':'image-viewer-caption'},
+      el('button',{type:'button',class:'image-viewer-close',autofocus:true,onclick:closeImageViewer},t.closeImage+' ×'),
+      el('img',{src:image.file,alt:`${name(page)} — ${t.illustration.toLowerCase()}`,decoding:'async'}),caption);
+    dialog.addEventListener('click',event => {
+      if (event.target !== dialog) return;
+      const box = dialog.getBoundingClientRect();
+      if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) closeImageViewer();
+    });
+    dialog.addEventListener('close',() => { if (imageViewer === dialog) imageViewer = null; dialog.remove(); });
+    document.body.append(dialog);
+    imageViewer = dialog;
+    dialog.showModal();
+  }
   function figure(image, page, primary = false) {
     const details = el('details',{class:'evidence'},el('summary',{},t.source),el('p',{},chapterLabel(image.from)),el('p',{},t.artNote));
     return el('figure',{'data-image-from':image.from,class:primary?'primary-portrait':null},
-      el('img',{src:image.file,alt:`${name(page)} — ${t.illustration.toLowerCase()}`,loading:primary?'eager':'lazy',decoding:'async'}),
+      el('button',{type:'button',class:'image-expand','aria-label':`${t.enlargeImage}: ${name(page)}`,onclick:() => openImage(image,page)},
+        el('img',{src:image.file,alt:`${name(page)} — ${t.illustration.toLowerCase()}`,loading:primary?'eager':'lazy',decoding:'async'}),
+        el('span',{class:'image-expand-hint','aria-hidden':'true'},t.enlargeImage+' ↗')),
       el('figcaption',{},el('span',{class:'badge'},t.noncanonical),el('br'),t.imageCaption,details));
   }
   function nav(pages) {
@@ -256,7 +284,7 @@ if (typeof document !== 'undefined') (() => {
   }
   function render() {
     // Replace, rather than merely hide, stale content when the reader moves backwards.
-    app.replaceChildren(); controls(); const pages = ReaderRules.pages(data,cutoff); nav(pages);
+    closeImageViewer(); app.replaceChildren(); controls(); const pages = ReaderRules.pages(data,cutoff); nav(pages);
     if (document.body.dataset.page === 'index') landing(pages); else article(lookup.get(document.body.dataset.page));
   }
   window.addEventListener('storage',event => { if (event.key === data.storageKey) { cutoff = ReaderRules.cutoff(data,event.newValue); render(); } });
