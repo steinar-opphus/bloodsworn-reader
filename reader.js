@@ -8,6 +8,36 @@ const ReaderRules = {
   pages(data, cutoff) { return data.pages.filter(p => p.from <= cutoff && this.name(p, cutoff)); },
   blocks(page, cutoff) { return page.blocks.filter(b => b.from <= cutoff); },
   images(page, cutoff) { return page.images.filter(i => i.from <= cutoff); },
+  keyFacts(page, cutoff) { return (page.key_facts || []).filter(b => b.from <= cutoff && (!b.until || cutoff < b.until)); },
+  history(data, page, cutoff) {
+    const story = this.blocks(page, cutoff).filter(b => b.kind === 'story');
+    const selected = data.chapters.find(c => c.rank === cutoff);
+    if (!selected || data.consolidate_previous_books === false) return {previous:[],current:story};
+    const bookId = c => c.book_id || c.id.split('-')[0];
+    const currentBook = bookId(selected), previous = [], current = [];
+    const books = [...new Set(data.chapters.filter(c => c.rank <= cutoff).map(bookId))];
+    for (const book of books) {
+      const chapters = data.chapters.filter(c => bookId(c) === book);
+      const ranks = new Set(chapters.map(c => c.rank));
+      const blocks = story.filter(b => ranks.has(b.from));
+      if (book === currentBook) { current.push(...blocks); continue; }
+      const recap = (page.recaps || []).find(r => r.book === book);
+      if (blocks.length || recap) previous.push({book,title:chapters[0].book,
+        blocks:recap ? recap.blocks.filter(b => b.from <= cutoff) : blocks,
+        from:Math.min(...ranks),through:Math.max(...ranks),replace_profile:!!recap?.replace_profile});
+    }
+    return {previous,current};
+  },
+  mainProfile(data, page, cutoff, history = this.history(data,page,cutoff)) {
+    const opening = this.blocks(page,cutoff).filter(b => b.kind !== 'story');
+    const snapshot = history.previous.filter(p => p.replace_profile).at(-1);
+    const blocks = snapshot ? [...snapshot.blocks,...opening.filter(b => (b.evidence_from || b.from) > snapshot.through)] : [...opening];
+    for (const earlier of history.previous) {
+      if (snapshot && earlier.through <= snapshot.through) continue;
+      blocks.push(...earlier.blocks.map(b => ({...b,kind:'history',heading:'History',main_section:true,profile_book:earlier.book})));
+    }
+    return blocks;
+  },
   summaries(page, cutoff) { return (page.summaries || []).filter(c => c.from <= cutoff); },
   passages(blocks, maxWords = 150) {
     const result = [];
@@ -28,14 +58,15 @@ if (typeof document !== 'undefined') (() => {
   const data = window.READER_DATA;
   if (!data) return;
   const en = {
-    companion:'A reading companion',explore:'Explore',about:'About this edition',yourReading:'YOUR READING',setPlace:'Set your place.',
+    personality:'Personality',history:'History at first meeting',keyInformation:'At a glance',firstAppearance:'First appearance',previousHistory:'Earlier books',reviewedBackground:'Reviewed spoiler-free background',
+    companion:'Reader wiki',explore:'Explore',about:'About this edition',yourReading:'YOUR READING',setPlace:'Reading position',
     controlHelp:'Explore only what you have already read.',savedLocally:'Your choice stays in this browser.',browse:'BROWSE THE WIKI',quietPromise:'The next discovery can wait.',
     footer:'An unofficial reading companion. Illustrations are artistic interpretations.',book:'Book',chapter:'Chapter',notStarted:'Not started',reset:'Reset reading position',
-    heroA:'A world to discover.',heroB:'At your own pace.',edition:'THE ILLUSTRATED READER EDITION',choose:'Choose your chapter to begin',protected:'Later material is hidden',
+    heroA:'Explore the wiki.',heroB:'At your chapter.',edition:'READER WIKI',choose:'Choose your chapter to begin',protected:'Later material is hidden',
     begin:'Begin with chapter 1',startTitle:'Your story starts here.',startText:'Choose the last chapter you have finished. People, places and illustrations will appear as you encounter them.',
     featured:'People to follow',featuredHint:'A FEW FAMILIAR FACES',read:'Read their story',firstMeeting:'First meeting',search:'Find a page',searchPlaceholder:'Search known names…',
     people:'More people',other:'Explore the world',noMatches:'No known pages match your search.',later:'Later material stays hidden. Change your reading position when you are ready.',
-    aboutTitle:'Made for the way you read.',aboutText:'This edition draws on the source-backed Markdown wiki. It organises its knowledge into a quieter, illustrated reading experience. Character development remains folded away until you choose to open it.',
+    aboutTitle:'About this reader',aboutText:'This edition draws on the source-backed Markdown wiki. It organises its knowledge into a quieter, illustrated reading experience. Character development remains folded away until you choose to open it.',
     aboutMore:'Your reading position is stored only in this browser and is not synced between devices. Spoiler controls hide information in the interface; the complete exported site is publicly downloadable.',
     artNote:'Illustrations are noncanonical artistic interpretations. Their details are not additional evidence about the books.',
     futureTitle:'There is more to discover.',futureText:'This page is outside your selected reading position. Return after reading further, or change your chapter.',
@@ -47,14 +78,15 @@ if (typeof document !== 'undefined') (() => {
     introduction:'Introduction',noSummary:'This chapter summary is awaiting a source-verified revision.', enlargeImage:'View larger image', closeImage:'Close image'
   };
   const nb = {
+    personality:'Personlighet',history:'Historie ved første møte',keyInformation:'Nøkkelinformasjon',firstAppearance:'Første opptreden',previousHistory:'Tidligere bøker',reviewedBackground:'Spoilervurdert bakgrunn',
     enlargeImage:'Vis større bilde', closeImage:'Lukk bilde',
-    companion:'En lesefølgesvenn',explore:'Utforsk',about:'Om denne utgaven',yourReading:'DIN LESING',setPlace:'Finn ditt sted.',controlHelp:'Utforsk bare det du allerede har lest.',
+    companion:'Leserwiki',explore:'Utforsk',about:'Om denne utgaven',yourReading:'DIN LESING',setPlace:'Leseposisjon',controlHelp:'Utforsk bare det du allerede har lest.',
     savedLocally:'Valget lagres i denne nettleseren.',browse:'UTFORSK WIKIEN',quietPromise:'Neste oppdagelse kan vente.',footer:'En uoffisiell lesefølgesvenn. Bildene er kunstneriske tolkninger.',
-    book:'Bok',chapter:'Kapittel',notStarted:'Ikke startet',reset:'Nullstill leseposisjon',heroA:'En verden å oppdage.',heroB:'I ditt eget tempo.',edition:'DEN ILLUSTRERTE LESERUTGAVEN',
+    book:'Bok',chapter:'Kapittel',notStarted:'Ikke startet',reset:'Nullstill leseposisjon',heroA:'Utforsk wikien.',heroB:'På ditt kapittel.',edition:'LESERWIKI',
     choose:'Velg kapittel for å begynne',protected:'Senere innhold er skjult',begin:'Begynn med kapittel 1',startTitle:'Historien din begynner her.',
     startText:'Velg det siste kapittelet du har lest ferdig. Personer, steder og bilder vises etter hvert som du møter dem.',featured:'Personer å følge',featuredHint:'NOEN KJENTE ANSIKTER',
     read:'Les historien',firstMeeting:'Første møte',search:'Finn en side',searchPlaceholder:'Søk etter kjente navn…',people:'Flere personer',other:'Utforsk verden',noMatches:'Ingen kjente sider passer søket.',
-    later:'Senere innhold er skjult. Endre leseposisjonen når du er klar.',aboutTitle:'Laget for måten du leser på.',
+    later:'Senere innhold er skjult. Endre leseposisjonen når du er klar.',aboutTitle:'Om leserwikien',
     aboutText:'Denne utgaven bygger på den kildebelagte Markdown-wikien, med sammenhengende tekst og illustrasjoner. Personenes utvikling er minimert til du velger å åpne den.',
     aboutMore:'Leseposisjonen lagres bare i denne nettleseren og synkroniseres ikke mellom enheter. Spoilerkontrollen skjuler informasjon i visningen; hele nettstedet kan lastes ned.',
     artNote:'Bildene er kunstneriske tolkninger og gir ikke ytterligere kildebelegg om bøkene.',futureTitle:'Det er mer å oppdage.',futureText:'Denne siden ligger etter valgt leseposisjon. Kom tilbake når du har lest videre, eller endre kapittel.',
@@ -63,7 +95,7 @@ if (typeof document !== 'undefined') (() => {
     books:'Bøker',bookPage:'Boken',chapterSummaries:'Kapitteloppsummeringer',chapters:'Kapitler',readBook:'Utforsk boken',bookHint:'LES KAPITTEL FOR KAPITTEL',
     bookHelp:'Bare oppsummeringer frem til leseposisjonen vises nedenfor.',available:'kapitler i denne utgaven',introduction:'Introduksjon',noSummary:'Denne kapitteloppsummeringen venter på en kildeverifisert revisjon.'
   };
-  const nn = {...nb,enlargeImage:'Vis større bilete',closeImage:'Lukk bilete',setPlace:'Finn din stad.',controlHelp:'Utforsk berre det du allereie har lese.',savedLocally:'Valet vert lagra i denne nettlesaren.',
+  const nn = {...nb,personality:'Personlegdom',history:'Historie ved første møte',keyInformation:'Nøkkelinformasjon',firstAppearance:'Første framkomst',previousHistory:'Tidlegare bøker',reviewedBackground:'Spoilervurdert bakgrunn',enlargeImage:'Vis større bilete',closeImage:'Lukk bilete',setPlace:'Leseposisjon',controlHelp:'Utforsk berre det du allereie har lese.',savedLocally:'Valet vert lagra i denne nettlesaren.',
     notStarted:'Ikkje byrja',reset:'Nullstill leseposisjonen',begin:'Byrj med kapittel 1',startTitle:'Historia di byrjar her.',startText:'Vel det siste kapittelet du har lese ferdig. Personar, stader og bilete vert viste etter kvart som du møter dei.',
     choose:'Vel kapittel for å byrje',protected:'Seinare innhald er skjult',later:'Seinare innhald er skjult. Endre leseposisjonen når du er klar.',
     appearance:'Utsjånad',source:'Kjeldetilvisingar',imageCaption:'Illustrasjonen er ikkje kanonisk og vert først vist etter den dokumenterte kapittelgrensa.',
@@ -129,8 +161,8 @@ if (typeof document !== 'undefined') (() => {
     const refs = [...new Set(blocks.flatMap(b => b.refs).map(id => {
       const m = id.match(/f-(b\d+)-(c\d+)-/i);
       return m ? `${m[1]}-${m[2]}`.toUpperCase() : '';
-    }))].map(id => data.chapters.find(c => c.id === id)).filter(Boolean);
-    return el('details',{class:'evidence'},el('summary',{},t.source),refs.map(c => el('p',{},chapterLabel(c.rank))));
+    }))].map(id => data.chapters.find(c => c.id === id)).filter(c => c && c.rank <= cutoff);
+    return el('details',{class:'evidence'},el('summary',{},t.source),refs.map(c => el('p',{},chapterLabel(c.rank))),blocks.some(b => b.reviewed_early) ? el('p',{},t.reviewedBackground) : null);
   }
   function prose(blocks, lead = false) {
     if (!blocks.length) return [];
@@ -167,7 +199,7 @@ if (typeof document !== 'undefined') (() => {
       el('button',{type:'button',class:'image-expand','aria-label':`${t.enlargeImage}: ${name(page)}`,onclick:() => openImage(image,page)},
         el('img',{src:image.file,alt:`${name(page)} — ${t.illustration.toLowerCase()}`,loading:primary?'eager':'lazy',decoding:'async'}),
         el('span',{class:'image-expand-hint','aria-hidden':'true'},t.enlargeImage+' ↗')),
-      el('figcaption',{},el('span',{class:'badge'},t.noncanonical),el('br'),t.imageCaption,details));
+      el('figcaption',{},el('span',{class:'badge'},t.noncanonical),el('br'),image.caption || t.imageCaption,details));
   }
   function nav(pages) {
     const node = document.getElementById('category-nav'); node.replaceChildren();
@@ -233,20 +265,61 @@ if (typeof document !== 'undefined') (() => {
       el('header',{class:'article-heading'},el('span',{class:'eyebrow'},data.categories[page.category]),el('h1',{},name(page))));
     if (page.type === 'book') { bookArticle(page); return; }
     const lead = images.find(i => i.role === 'primary' && !i.spoiler);
-    const top = el('div',{class:'profile-top'+(lead?'':' no-image')});
+    const facts = ReaderRules.keyFacts(page,cutoff);
+    const history = ReaderRules.history(data,page,cutoff);
+    const mainBlocks = ReaderRules.mainProfile(data,page,cutoff,history);
+    const usedImages = new Set(lead ? [lead.file] : []);
+    const hasBox = page.category === 'characters' || lead || facts.length;
+    const top = el('div',{class:'profile-top'+(hasBox?'':' no-image')});
     const intro = el('div',{class:'prose'});
-    intro.append(...prose(blocks.filter(b => b.kind === 'introduction'),true));
-    for (const kind of ['background','appearance']) {
-      const group = blocks.filter(b => b.kind === kind);
-      if (group.length) intro.append(el('h2',{},t[kind]),...prose(group));
+    intro.append(...prose(mainBlocks.filter(b => b.kind === 'introduction'),true));
+    const mainGroups = new Map();
+    for (const block of mainBlocks.filter(b => b.kind !== 'introduction')) {
+      const heading = block.main_section ? block.heading : t[block.kind] || block.heading;
+      if (!mainGroups.has(heading)) mainGroups.set(heading,[]);
+      mainGroups.get(heading).push(block);
     }
-    top.append(intro); if (lead) top.append(figure(lead,page,true)); app.append(top);
-    const story = blocks.filter(b => b.kind === 'story');
+    const pastImages = images.filter(i => !usedImages.has(i.file) && history.previous.some(p => i.from >= p.from && i.from <= p.through));
+    const mainImages = new Map();
+    const refRank = group => Math.max(0,...group.flatMap(b => b.refs).map(ref => {
+      const m = ref.match(/f-(b\d+)-(c\d+)-/i);
+      return m ? data.chapters.find(c => c.id === (m[1]+'-'+m[2]).toUpperCase())?.rank || 0 : 0;
+    }));
+    for (const image of pastImages) {
+      const matching = [...mainGroups].find(([,group]) => group.some(b => b.kind === 'history') && refRank(group) >= image.from);
+      const heading = matching?.[0] || [...mainGroups.keys()].at(-1) || t.history;
+      if (!mainGroups.has(heading)) mainGroups.set(heading,[]);
+      if (!mainImages.has(heading)) mainImages.set(heading,[]);
+      mainImages.get(heading).push(image);usedImages.add(image.file);
+    }
+    for (const [heading,group] of mainGroups) {
+      const section = el('section',{class:'main-biography-section','data-history-book':group.find(b => b.profile_book)?.profile_book || null},
+        el('h2',{},heading),...prose(group),...(mainImages.get(heading)||[]).map(i => figure(i,page)));
+      intro.append(section);
+    }
+    top.append(intro);
+    if (hasBox) {
+      const fields = el('dl',{class:'key-facts'});
+      fields.append(el('dt',{},t.firstAppearance),el('dd',{},chapterLabel(page.from)));
+      const labels = new Map();
+      for (const fact of facts) {
+        if (!labels.has(fact.label)) labels.set(fact.label,[]);
+        labels.get(fact.label).push(fact);
+      }
+      for (const [label,rows] of labels) fields.append(el('dt',{},label),el('dd',{},
+        rows.length === 1 ? tokens(rows[0]) : el('ul',{},rows.map(row => el('li',{},tokens(row))))));
+      const box = el('aside',{class:'profile-box','aria-label':t.keyInformation},el('h2',{},name(page)));
+      if (lead) box.append(figure(lead,page,true));
+      box.append(fields); if (facts.length) box.append(evidence(facts));
+      top.append(box);
+    }
+    app.append(top);
+    const story = history.current;
     const groups = new Map();
-    story.forEach(b => { if (!groups.has(b.heading)) groups.set(b.heading,[]); groups.get(b.heading).push(b); });
+    story.forEach(b => { const key = b.from+'|'+b.heading; if (!groups.has(key)) groups.set(key,[]); groups.get(key).push(b); });
     // Additional images follow their explanation inside its disclosure, never as an unguarded gallery.
     const sectionImages = new Map();
-    for (const image of images.filter(i => i !== lead)) {
+    for (const image of images.filter(i => !usedImages.has(i.file))) {
       const matching = [...groups].filter(([,bs]) => Math.max(...bs.map(b => b.from)) >= image.from);
       const heading = matching[0]?.[0] || [...groups.keys()].at(-1) || t.illustration;
       if (!groups.has(heading)) groups.set(heading,[]);
@@ -256,7 +329,8 @@ if (typeof document !== 'undefined') (() => {
     if (groups.size) app.append(el('h2',{class:'story-title'},page.category==='characters'?t.story:t.worldStory));
     for (const [heading,group] of groups) {
       const ranks = [...group.map(b => b.from),...(sectionImages.get(heading)||[]).map(i => i.from)];
-      const summary = el('summary',{},heading,el('small',{},chapterLabel(Math.max(...ranks))));
+      const title = group[0]?.heading || t.illustration;
+      const summary = el('summary',{},title,el('small',{},chapterLabel(Math.max(...ranks))));
       const content = el('div',{class:'prose'},prose(group), (sectionImages.get(heading)||[]).map(i => figure(i,page)));
       app.append(el('details',{class:'story-section'},summary,content));
     }
